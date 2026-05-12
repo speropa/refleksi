@@ -164,20 +164,20 @@
             <!-- Notifikasi Siswa -->
             <div id="s-notif" class="fixed top-[85px] left-1/2 transform -translate-x-1/2 bg-emerald-600 text-white px-6 py-2 rounded-full font-bold text-sm shadow-lg z-50 transition-all duration-300 translate-y-[-100%] opacity-0">Tersimpan!</div>
 
-            <!-- Input Q1 (Emoticon) -->
-            <div id="s-q1-input" class="hidden w-full bg-white p-6 rounded-3xl shadow-lg border border-slate-100 grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <!-- JS Injected -->
+            <!-- Peringatan Cooldown -->
+            <div id="s-cooldown-alert" class="hidden w-full bg-orange-100 text-orange-800 p-3 rounded-xl text-center font-semibold text-sm mb-4 border border-orange-300 shadow-sm transition-all">
+                ⏳ Kamu bisa mengubah jawaban dalam <span id="cooldown-timer-text" class="font-extrabold text-orange-600">15</span> detik.
             </div>
 
-            <!-- Input Q2 & Q3 (Textarea) -->
-            <div id="s-q23-input" class="hidden w-full bg-white p-6 rounded-3xl shadow-lg border border-slate-100 flex flex-col space-y-4">
+            <!-- Input Q1 (Emoticon) -->
+            <div id="s-q1-input" class="hidden w-full bg-white p-6 rounded-3xl shadow-lg border border-slate-100 grid grid-cols-2 sm:grid-cols-3 gap-3 transition-all duration-300">
                 <p class="text-sm font-semibold text-slate-500 mb-1">Ketikan jawabanmu dengan jujur:</p>
                 <textarea id="s-textarea" rows="4" class="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all outline-none resize-none text-base text-slate-800" placeholder="Ketik di sini..."></textarea>
                 <button id="btn-s-submit" onclick="studentSubmitText()" class="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-md transition-all active:scale-95 text-lg">Kirim Jawaban</button>
             </div>
 
             <!-- Input Q4 (Rating) -->
-            <div id="s-q4-input" class="hidden w-full bg-white p-6 rounded-3xl shadow-lg border border-slate-100">
+            <div id="s-q4-input" class="hidden w-full bg-white p-6 rounded-3xl shadow-lg border border-slate-100 transition-all duration-300">
                 <p class="text-center text-sm font-semibold text-slate-500 mb-6">Pilih angka (1 = Sangat Buruk, 10 = Sangat Baik)</p>
                 <div class="grid grid-cols-5 gap-3" id="s-q4-grid">
                     <!-- JS Injected 1-10 -->
@@ -235,6 +235,11 @@
         let myUserId = null;
         let globalState = { questionIndex: 0, showQuestion: false };
         let unsubscribeAnswers = null; // Untuk membersihkan listener data guru
+
+        // Variabel Cooldown
+        let lastSubmitTimes = {}; // Menyimpan rekam jejak kapan terakhir siswa jawab per soal
+        const COOLDOWN_DURATION = 15000; // 15 detik (dalam milidetik)
+        let cooldownInterval = null; // Interval timer UI
         
         const urlParams = new URLSearchParams(window.location.search);
         const isGuru = urlParams.get('bypass') === 'guru';
@@ -512,6 +517,61 @@
             });
             // Setup awal HTML Rating & Emoji
             buildStudentInputs();
+
+            // Mulai loop pengecekan cooldown UI (hanya dijalankan di mode siswa)
+            if(!cooldownInterval) cooldownInterval = setInterval(manageCooldownUI, 1000);
+        }
+
+        // Fungsi mengatur UI Cooldown (disabled/enabled input siswa)
+        function manageCooldownUI() {
+            if (!globalState.showQuestion || isGuru) return;
+            
+            const qIdx = globalState.questionIndex;
+            const lastTime = lastSubmitTimes[qIdx] || 0;
+            const timePassed = Date.now() - lastTime;
+            
+            const alertBox = document.getElementById('s-cooldown-alert');
+            const timerText = document.getElementById('cooldown-timer-text');
+            const btnSubmitText = document.getElementById('btn-s-submit');
+            
+            const q1Container = document.getElementById('s-q1-input');
+            const q4Container = document.getElementById('s-q4-input');
+
+            if (timePassed < COOLDOWN_DURATION) {
+                // Sedang Cooldown!
+                const timeLeft = Math.ceil((COOLDOWN_DURATION - timePassed) / 1000);
+                alertBox.classList.remove('hidden');
+                timerText.innerText = timeLeft;
+                
+                // Matikan Input
+                if (qIdx === 0) {
+                    q1Container.classList.add('opacity-50', 'pointer-events-none', 'grayscale');
+                } else if (qIdx === 1 || qIdx === 2) {
+                    document.getElementById('s-textarea').readOnly = true;
+                    btnSubmitText.disabled = true;
+                    btnSubmitText.innerText = `Terkunci (${timeLeft}s)`;
+                    btnSubmitText.classList.remove('bg-emerald-600', 'hover:bg-emerald-500');
+                    btnSubmitText.classList.add('bg-slate-400', 'cursor-not-allowed', 'opacity-70');
+                } else if (qIdx === 3) {
+                    q4Container.classList.add('opacity-50', 'pointer-events-none', 'grayscale');
+                }
+            } else {
+                // Cooldown Selesai!
+                alertBox.classList.add('hidden');
+                
+                // Nyalakan Input
+                if (qIdx === 0) {
+                    q1Container.classList.remove('opacity-50', 'pointer-events-none', 'grayscale');
+                } else if (qIdx === 1 || qIdx === 2) {
+                    document.getElementById('s-textarea').readOnly = false;
+                    btnSubmitText.disabled = false;
+                    btnSubmitText.innerText = lastSubmitTimes[qIdx] ? "Update Jawaban" : "Kirim Jawaban";
+                    btnSubmitText.classList.add('bg-emerald-600', 'hover:bg-emerald-500');
+                    btnSubmitText.classList.remove('bg-slate-400', 'cursor-not-allowed', 'opacity-70');
+                } else if (qIdx === 3) {
+                    q4Container.classList.remove('opacity-50', 'pointer-events-none', 'grayscale');
+                }
+            }
         }
 
         function buildStudentInputs() {
@@ -582,7 +642,13 @@
                 resetStudentInputs(qIdx);
 
                 if (snap.exists()) {
-                    const myPastAnswer = snap.val().answer;
+                    const data = snap.val();
+                    const myPastAnswer = data.answer;
+                    
+                    // Ambil waktu kirim dari DB untuk mencegah siswa bypass cooldown dengan Refresh
+                    if (data.timestamp) {
+                        lastSubmitTimes[qIdx] = data.timestamp;
+                    }
                     
                     // Kembalikan ke UI
                     if (qIdx === 0) {
@@ -601,6 +667,7 @@
                         document.getElementById('btn-s-submit').innerText = "Kirim Jawaban";
                     }
                 }
+                manageCooldownUI(); // Update state cooldown sesaat setelah ganti soal/refresh
             });
         }
 
@@ -626,6 +693,11 @@
         window.submitStudentAnswer = function(answerValue, forceQIndex = null) {
             const qIdx = forceQIndex !== null ? forceQIndex : globalState.questionIndex;
             
+            // Pengaman Lapis Ganda: Cegah eksekusi jika masih cooldown
+            if (lastSubmitTimes[qIdx] && (Date.now() - lastSubmitTimes[qIdx] < COOLDOWN_DURATION)) {
+                return;
+            }
+
             // Simpan ke database
             set(ref(db, `${basePath}/answers/${qIdx}/${myUserId}`), {
                 answer: answerValue,
@@ -633,7 +705,10 @@
                 device: studentProfile.device,
                 timestamp: Date.now()
             }).then(() => {
-                showStudentNotif();
+                showStudentNotif("Tersimpan!");
+                lastSubmitTimes[qIdx] = Date.now(); // Catat waktu
+                manageCooldownUI(); // Paksa update UI langsung terkunci
+                
                 // Update UI langsung di HP siswa untuk memberi tanda "terpilih"
                 resetStudentInputs(qIdx);
                 if (qIdx === 0) {
@@ -646,6 +721,13 @@
 
         // Khusus isian teks (TextArea)
         window.studentSubmitText = function() {
+            const qIdx = globalState.questionIndex;
+
+            // Pengaman Lapis Ganda: Cegah eksekusi jika masih cooldown
+            if (lastSubmitTimes[qIdx] && (Date.now() - lastSubmitTimes[qIdx] < COOLDOWN_DURATION)) {
+                return;
+            }
+
             const text = document.getElementById('s-textarea').value.trim();
             if (!text) {
                 alert("Jawaban tidak boleh kosong ya!");
@@ -653,23 +735,21 @@
             }
             
             const btn = document.getElementById('btn-s-submit');
-            const originalText = btn.innerText;
             btn.innerText = "Mengirim...";
             btn.disabled = true;
 
-            set(ref(db, `${basePath}/answers/${globalState.questionIndex}/${myUserId}`), {
+            set(ref(db, `${basePath}/answers/${qIdx}/${myUserId}`), {
                 answer: text,
                 name: studentProfile.name,
                 device: studentProfile.device,
                 timestamp: Date.now()
             }).then(() => {
-                showStudentNotif();
-                btn.innerText = "Update Jawaban"; // Ubah tombol jadi mode edit
-                btn.disabled = false;
+                showStudentNotif("Tersimpan!");
+                lastSubmitTimes[qIdx] = Date.now(); // Catat Waktu
+                manageCooldownUI(); // Kunci & Munculkan Cooldown
             }).catch(() => {
                 alert("Gagal mengirim, periksa koneksi internet.");
-                btn.innerText = originalText;
-                btn.disabled = false;
+                manageCooldownUI(); // Reset kembalikan tombol
             });
         }
     </script>
