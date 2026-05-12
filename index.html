@@ -54,16 +54,17 @@
         textarea::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         
         /* Animasi Komentar Melayang */
-        @keyframes floatUp {
-            0% { transform: translateY(100vh) scale(0.8); opacity: 0; }
-            10% { opacity: 1; transform: translateY(80vh) scale(1); }
-            90% { opacity: 1; }
-            100% { transform: translateY(-20vh) scale(1.1); opacity: 0; }
+        @keyframes floatUpSmooth {
+            0% { transform: translateY(110vh) translateX(0px) scale(0.8); opacity: 0; }
+            10% { opacity: 1; transform: translateY(80vh) translateX(15px) scale(1); }
+            50% { transform: translateY(40vh) translateX(-15px) scale(1.05); }
+            90% { opacity: 1; transform: translateY(0vh) translateX(15px) scale(1); }
+            100% { transform: translateY(-20vh) translateX(0px) scale(0.9); opacity: 0; }
         }
         .floating-comment {
             position: absolute;
             bottom: 0;
-            animation: floatUp 12s linear forwards;
+            will-change: transform, opacity;
             z-index: 30;
         }
 
@@ -225,15 +226,15 @@
             { id: 'senang', char: '😊', label: 'Senang' },
             { id: 'biasa', char: '😐', label: 'Biasa' },
             { id: 'tidak_senang', char: '😕', label: 'Tidak Senang' },
-            { id: 'sangat_tidak_senang', char: '😭', label: 'Sangat Sedih' }
-        ];
+        { id: 'sangat_tidak_senang', char: '😭', label: 'Sangat Sedih' }
+    ];
 
-        let teacherListeners = [];
-        let commentQueue = [];
-        let activeComments = 0;
-        let floatingInterval = null;
+    let teacherListeners = [];
+    let allComments = [];
+    let activeComments = 0;
+    let floatingInterval = null;
 
-        async function initAuth() {
+    async function initAuth() {
             try {
                 await signInAnonymously(auth);
                 userId = auth.currentUser.uid;
@@ -296,7 +297,7 @@
             
             // Bersihkan antrean dan interval
             document.getElementById('floating-container').innerHTML = '';
-            commentQueue = [];
+            allComments = [];
             activeComments = 0;
             if(floatingInterval) clearInterval(floatingInterval);
 
@@ -355,16 +356,22 @@
             // Dengarkan komentar masuk secara realtime (RTDB)
             const unsub = onChildAdded(colRef, (snapshot) => {
                 emptyState.classList.add('hide'); // Ada data, sembunyikan tulisan "menunggu"
-                commentQueue.push(snapshot.val().text);
+                const text = snapshot.val().text;
+                
+                // Simpan ke memori untuk di-looping
+                allComments.push(text);
+                
+                // PRIORITAS UTAMA: Langsung munculkan saat itu juga! (Respons instan 100%)
+                spawnFloatingComment(text);
             });
 
-            // Loop Antrean: Muncul satu per satu tiap 1.5 detik
+            // Latar Belakang: Munculkan ulang komentar lama secara acak agar layar terus terisi
             floatingInterval = setInterval(() => {
-                if (commentQueue.length > 0 && activeComments < 10) {
-                    const text = commentQueue.shift(); // Ambil dari antrean
-                    spawnFloatingComment(text);
+                if (allComments.length > 0 && activeComments < 15) { // Maksimal 15 melayang bersamaan
+                    const randomIndex = Math.floor(Math.random() * allComments.length);
+                    spawnFloatingComment(allComments[randomIndex]);
                 }
-            }, 1500);
+            }, 2000); // Coba munculkan tiap 2 detik
 
             teacherListeners.push(unsub);
         }
@@ -374,30 +381,34 @@
             const container = document.getElementById('floating-container');
             const el = document.createElement('div');
             
-            const colors = ['bg-white text-slate-800', 'bg-blue-100 text-blue-900', 'bg-emerald-100 text-emerald-900', 'bg-purple-100 text-purple-900', 'bg-amber-100 text-amber-900'];
+            const colors = ['bg-white text-slate-800', 'bg-blue-100 text-blue-900', 'bg-emerald-100 text-emerald-900', 'bg-purple-100 text-purple-900', 'bg-amber-100 text-amber-900', 'bg-rose-100 text-rose-900'];
             const randomColor = colors[Math.floor(Math.random() * colors.length)];
             
             // Posisi X acak (antara 5% - 75% lebar agar aman dari pinggir layar)
             const leftPos = 5 + (Math.random() * 70);
             
-            el.className = `floating-comment px-6 py-4 rounded-2xl shadow-2xl text-2xl font-bold max-w-md break-words ${randomColor}`;
+            // Durasi acak agar terlihat lebih natural dan tidak seragam (lambat: 15-22 detik)
+            const duration = 15 + Math.random() * 7;
+            
+            el.className = `floating-comment px-6 py-4 rounded-2xl shadow-2xl text-2xl font-bold max-w-md break-words border-2 border-white/50 ${randomColor}`;
             el.style.left = `${leftPos}%`;
+            el.style.animation = `floatUpSmooth ${duration}s ease-in-out forwards`;
+            
+            // Beri sedikit rotasi acak
+            const rotation = (Math.random() - 0.5) * 8;
+            el.style.transform = `rotate(${rotation}deg)`;
+            
             el.innerText = text;
             
             container.appendChild(el);
 
-            // Hapus setelah 12 detik, lalu jeda 5 detik, kemudian masukkan ulang ke antrean
+            // Hapus setelah animasi selesai berdasarkan durasinya
             setTimeout(() => {
                 if (container.contains(el)) {
                     container.removeChild(el);
                 }
                 activeComments--;
-                
-                setTimeout(() => {
-                    commentQueue.push(text); // Masukkan lagi agar terus menerus
-                }, 5000); 
-
-            }, 12000);
+            }, duration * 1000);
         }
 
         function setupTeacherQ4() {
