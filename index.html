@@ -53,22 +53,16 @@
         textarea::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
         textarea::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         
-        /* Animasi Komentar Melayang */
-        @keyframes floatUpSmooth {
-            0% { transform: translateY(110vh) translateX(0px) scale(0.8); opacity: 0; }
-            10% { opacity: 1; transform: translateY(80vh) translateX(15px) scale(1); }
-            50% { transform: translateY(40vh) translateX(-15px) scale(1.05); }
-            90% { opacity: 1; transform: translateY(0vh) translateX(15px) scale(1); }
-            100% { transform: translateY(-20vh) translateX(0px) scale(0.9); opacity: 0; }
-        }
-        .floating-comment {
-            position: absolute;
-            bottom: 0;
-            will-change: transform, opacity;
-            z-index: 30;
-        }
-
         .hide { display: none !important; }
+        
+        /* Animasi Muncul Note */
+        @keyframes popIn {
+            0% { transform: scale(0.8) translateY(20px); opacity: 0; }
+            100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        .note-card {
+            animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
     </style>
 </head>
 <body class="min-h-screen flex flex-col items-center justify-center relative">
@@ -99,6 +93,13 @@
         </div>
     </div>
 
+    <!-- Name Input Screen -->
+    <div id="name-input-screen" class="hide w-full max-w-md px-6 flex flex-col items-center text-center space-y-6 z-40">
+        <h2 class="text-3xl font-bold text-white mb-2">Siapa namamu?</h2>
+        <input type="text" id="student-name-input" class="w-full p-4 rounded-xl text-slate-900 text-lg font-bold text-center outline-none focus:ring-4 focus:ring-emerald-500/50" placeholder="Ketik nama panggilanmu">
+        <button onclick="submitName()" class="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-2xl shadow-lg transition-all active:scale-95">Mulai Masuk Kelas</button>
+    </div>
+
     <!-- Teacher View -->
     <div id="teacher-view" class="hide w-full h-screen flex flex-col bg-slate-900 overflow-hidden relative">
 
@@ -115,8 +116,8 @@
         <div class="flex-1 flex flex-col items-center justify-center p-10 z-40 relative h-full">
             <h2 id="teacher-question-text" class="text-4xl md:text-5xl font-extrabold text-center text-white mb-16 max-w-5xl leading-tight z-50">Memuat Pertanyaan...</h2>
             
-            <!-- Floating Comments Container (Untuk Q2 & Q3) -->
-            <div id="floating-container" class="hide absolute inset-0 pointer-events-none overflow-hidden z-20"></div>
+            <!-- Notes Container (Untuk Q2 & Q3) -->
+            <div id="teacher-q23-notes" class="hide w-full max-w-6xl max-h-[60vh] overflow-y-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-4 z-50 content-start"></div>
 
             <!-- Q1 Visuals (Emojis) -->
             <div id="teacher-q1-visuals" class="hide w-full max-w-5xl flex justify-around items-end h-64 border-b border-slate-700 pb-8 z-50">
@@ -172,6 +173,13 @@
                     </div>
                 </div>
                 
+                <!-- Done/Already Submitted Message -->
+                <div id="student-done-message" class="hide w-full text-center p-6 bg-slate-50 border border-slate-200 rounded-2xl">
+                    <div class="text-4xl mb-2">✅</div>
+                    <h3 class="text-lg font-bold text-slate-800">Jawaban tersimpan!</h3>
+                    <p class="text-slate-500 text-sm mt-1">Menunggu guru mengganti pertanyaan...</p>
+                </div>
+
                 <div id="waiting-message" class="hide mt-6 text-slate-500 text-center text-sm font-medium">
                     <div class="loader w-6 h-6 border-[3px] mx-auto mb-2 !border-slate-200 !border-left-emerald-500"></div>
                     Menunggu guru mengganti pertanyaan...
@@ -183,9 +191,9 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getDatabase, ref, set, onValue, push, onChildAdded } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
+        import { getDatabase, ref, set, onValue, onChildAdded } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
 
-        // Environment Variables & Sanitasi Karakter Terlarang RTDB
+        // Environment Variables & Sanitasi Karakter
         const rawAppId = typeof __app_id !== 'undefined' ? __app_id : 'reflection-canvas-default';
         const appId = rawAppId.replace(/[.#$\[\]]/g, '_');
         
@@ -203,16 +211,19 @@
         // Init Firebase
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
-        const db = getDatabase(app); // Menggunakan Realtime Database (RTDB)
+        const db = getDatabase(app); 
 
         // Core variables
         let userId = null;
         let currentUserRole = null;
         let currentQuestionIndex = 0;
+        let studentName = "";
+        let hasSubmitted = { 0: false, 1: false, 2: false, 3: false };
         
-        // Data Structure
-        const basePath = `artifacts/${appId}/public/data`;
-        const stateDbRef = ref(db, basePath + '/globalState/current');
+        // Struktur Database RTDB yang Lebih Rapi & Singkat
+        // Path Utama: kelas/{appId}
+        const basePath = `kelas/${appId}`;
+        const stateDbRef = ref(db, `${basePath}/state`);
         
         const QUESTIONS = [
             "Bagaimana pembelajaran pada pagi hari ini?",
@@ -226,15 +237,12 @@
             { id: 'senang', char: '😊', label: 'Senang' },
             { id: 'biasa', char: '😐', label: 'Biasa' },
             { id: 'tidak_senang', char: '😕', label: 'Tidak Senang' },
-        { id: 'sangat_tidak_senang', char: '😭', label: 'Sangat Sedih' }
-    ];
+            { id: 'sangat_tidak_senang', char: '😭', label: 'Sangat Sedih' }
+        ];
 
-    let teacherListeners = [];
-    let allComments = [];
-    let activeComments = 0;
-    let floatingInterval = null;
+        let teacherListeners = [];
 
-    async function initAuth() {
+        async function initAuth() {
             try {
                 await signInAnonymously(auth);
                 userId = auth.currentUser.uid;
@@ -257,13 +265,24 @@
                 document.getElementById('teacher-view').classList.remove('hide');
                 initTeacherMode();
             } else {
-                document.getElementById('student-view').classList.remove('hide');
-                initStudentMode();
+                document.getElementById('name-input-screen').classList.remove('hide');
+                setTimeout(() => document.getElementById('student-name-input').focus(), 100);
             }
         };
 
+        window.submitName = function() {
+            const nameInput = document.getElementById('student-name-input').value.trim();
+            if (!nameInput) {
+                alert("Tolong isi namamu dulu ya!");
+                return;
+            }
+            studentName = nameInput;
+            document.getElementById('name-input-screen').classList.add('hide');
+            document.getElementById('student-view').classList.remove('hide');
+            initStudentMode();
+        };
+
         function initTeacherMode() {
-            // Listen to state changes via RTDB
             onValue(stateDbRef, (snapshot) => {
                 if (snapshot.exists()) {
                     currentQuestionIndex = snapshot.val().questionIndex || 0;
@@ -291,17 +310,12 @@
             document.getElementById('btn-next').disabled = currentQuestionIndex === QUESTIONS.length - 1;
 
             document.getElementById('teacher-q1-visuals').classList.add('hide');
-            document.getElementById('floating-container').classList.add('hide');
+            document.getElementById('teacher-q23-notes').classList.add('hide');
             document.getElementById('teacher-q23-empty').classList.add('hide');
             document.getElementById('teacher-q4-visuals').classList.add('hide');
-            
-            // Bersihkan antrean dan interval
-            document.getElementById('floating-container').innerHTML = '';
-            allComments = [];
-            activeComments = 0;
-            if(floatingInterval) clearInterval(floatingInterval);
+            document.getElementById('teacher-q23-notes').innerHTML = '';
 
-            // Matikan listener sebelumnya
+            // Matikan Listener Sebelumnya
             teacherListeners.forEach(unsub => unsub());
             teacherListeners = [];
 
@@ -322,7 +336,7 @@
                 </div>
             `).join('');
 
-            const colRef = ref(db, basePath + '/q1_responses');
+            const colRef = ref(db, `${basePath}/answers/0`);
             const unsub = onValue(colRef, (snapshot) => {
                 const counts = {};
                 EMOJIS.forEach(e => counts[e.id] = 0);
@@ -339,76 +353,42 @@
                     document.getElementById(`emoji-viz-${e.id}`).style.transform = `scale(${Math.min(scale, 3)})`;
                 });
             });
-            
             teacherListeners.push(unsub);
         }
 
         function setupTeacherQ23(qIndex) {
-            const container = document.getElementById('floating-container');
+            const container = document.getElementById('teacher-q23-notes');
             const emptyState = document.getElementById('teacher-q23-empty');
             
             container.classList.remove('hide');
             emptyState.classList.remove('hide');
             
-            const colName = qIndex === 1 ? 'q2_responses' : 'q3_responses';
-            const colRef = ref(db, basePath + '/' + colName);
+            // Path rapi: kelas/{appId}/answers/{1_atau_2}
+            const colRef = ref(db, `${basePath}/answers/${qIndex}`);
             
-            // Dengarkan komentar masuk secara realtime (RTDB)
+            const noteColors = [
+                'bg-yellow-100 border-yellow-300 text-yellow-900',
+                'bg-emerald-100 border-emerald-300 text-emerald-900',
+                'bg-blue-100 border-blue-300 text-blue-900',
+                'bg-pink-100 border-pink-300 text-pink-900',
+                'bg-purple-100 border-purple-300 text-purple-900'
+            ];
+            
             const unsub = onChildAdded(colRef, (snapshot) => {
-                emptyState.classList.add('hide'); // Ada data, sembunyikan tulisan "menunggu"
-                const text = snapshot.val().text;
+                emptyState.classList.add('hide');
+                const data = snapshot.val();
                 
-                // Simpan ke memori untuk di-looping
-                allComments.push(text);
+                const el = document.createElement('div');
+                const colorClass = noteColors[Math.floor(Math.random() * noteColors.length)];
                 
-                // PRIORITAS UTAMA: Langsung munculkan saat itu juga! (Respons instan 100%)
-                spawnFloatingComment(text);
+                el.className = `note-card p-5 rounded-xl border-l-4 shadow-md ${colorClass} flex flex-col justify-between`;
+                el.innerHTML = `
+                    <p class="text-lg font-medium leading-relaxed mb-4 whitespace-pre-wrap">${data.answer}</p>
+                    <div class="text-sm font-bold opacity-75 border-t border-black/10 pt-2 text-right">~ ${data.name || 'Anonim'}</div>
+                `;
+                container.prepend(el);
             });
-
-            // Latar Belakang: Munculkan ulang komentar lama secara acak agar layar terus terisi
-            floatingInterval = setInterval(() => {
-                if (allComments.length > 0 && activeComments < 15) { // Maksimal 15 melayang bersamaan
-                    const randomIndex = Math.floor(Math.random() * allComments.length);
-                    spawnFloatingComment(allComments[randomIndex]);
-                }
-            }, 2000); // Coba munculkan tiap 2 detik
-
             teacherListeners.push(unsub);
-        }
-
-        function spawnFloatingComment(text) {
-            activeComments++;
-            const container = document.getElementById('floating-container');
-            const el = document.createElement('div');
-            
-            const colors = ['bg-white text-slate-800', 'bg-blue-100 text-blue-900', 'bg-emerald-100 text-emerald-900', 'bg-purple-100 text-purple-900', 'bg-amber-100 text-amber-900', 'bg-rose-100 text-rose-900'];
-            const randomColor = colors[Math.floor(Math.random() * colors.length)];
-            
-            // Posisi X acak (antara 5% - 75% lebar agar aman dari pinggir layar)
-            const leftPos = 5 + (Math.random() * 70);
-            
-            // Durasi acak agar terlihat lebih natural dan tidak seragam (lambat: 15-22 detik)
-            const duration = 15 + Math.random() * 7;
-            
-            el.className = `floating-comment px-6 py-4 rounded-2xl shadow-2xl text-2xl font-bold max-w-md break-words border-2 border-white/50 ${randomColor}`;
-            el.style.left = `${leftPos}%`;
-            el.style.animation = `floatUpSmooth ${duration}s ease-in-out forwards`;
-            
-            // Beri sedikit rotasi acak
-            const rotation = (Math.random() - 0.5) * 8;
-            el.style.transform = `rotate(${rotation}deg)`;
-            
-            el.innerText = text;
-            
-            container.appendChild(el);
-
-            // Hapus setelah animasi selesai berdasarkan durasinya
-            setTimeout(() => {
-                if (container.contains(el)) {
-                    container.removeChild(el);
-                }
-                activeComments--;
-            }, duration * 1000);
         }
 
         function setupTeacherQ4() {
@@ -427,7 +407,7 @@
             }
             container.innerHTML = html;
 
-            const colRef = ref(db, basePath + '/q4_responses');
+            const colRef = ref(db, `${basePath}/answers/3`);
             const unsub = onValue(colRef, (snapshot) => {
                 const counts = {};
                 for(let i=1; i<=10; i++) counts[i] = 0;
@@ -450,7 +430,6 @@
                     document.getElementById(`bar-${i}`).style.height = `${heightPct}%`;
                 }
             });
-            
             teacherListeners.push(unsub);
         }
 
@@ -474,9 +453,16 @@
             document.getElementById('student-q1-input').classList.add('hide');
             document.getElementById('student-q23-input').classList.add('hide');
             document.getElementById('student-q4-input').classList.add('hide');
+            document.getElementById('student-done-message').classList.add('hide');
             document.getElementById('waiting-message').classList.add('hide');
             
             document.getElementById('student-textarea').value = '';
+
+            // Cek jika sudah jawab
+            if (hasSubmitted[currentQuestionIndex]) {
+                document.getElementById('student-done-message').classList.remove('hide');
+                return; 
+            }
 
             if (currentQuestionIndex === 0) {
                 const q1Container = document.getElementById('student-q1-input');
@@ -520,67 +506,37 @@
         window.submitEmoji = async function(emojiId) {
             if (!userId) return;
             try {
-                await set(ref(db, basePath + `/q1_responses/${userId}`), {
+                await set(ref(db, `${basePath}/answers/${currentQuestionIndex}/${userId}`), {
                     answer: emojiId,
+                    name: studentName,
                     timestamp: Date.now()
                 });
+                hasSubmitted[currentQuestionIndex] = true;
                 showNotification("Pilihan tersimpan! 🤩");
+                updateStudentUI();
             } catch(e) {
                 console.error(e);
                 showNotification("Gagal menyimpan.", "error");
             }
         }
 
-        // Variabel untuk Cooldown Siswa
-        let lastSubmitTime = 0;
-        const COOLDOWN_MS = 15000; // 15 detik
-
         window.submitTextResponse = async function() {
             if (!userId) return;
-
-            // Cek durasi antara pengiriman terakhir dan sekarang
-            const now = Date.now();
-            const timeDiff = now - lastSubmitTime;
-            
-            // Jika kurang dari 15 detik, blokir.
-            if (timeDiff < COOLDOWN_MS) {
-                const waitTime = Math.ceil((COOLDOWN_MS - timeDiff) / 1000);
-                return showNotification(`Tunggu ${waitTime} detik lagi ya! ⏳`, "error");
-            }
 
             const text = document.getElementById('student-textarea').value.trim();
             if(!text) return showNotification("Tulis sesuatu dulu ya!", "error");
 
             try {
-                const colName = currentQuestionIndex === 1 ? 'q2_responses' : 'q3_responses';
-                const newDocRef = push(ref(db, basePath + '/' + colName));
-                
-                await set(newDocRef, {
-                    text: text,
-                    userId: userId,
-                    timestamp: now
+                await set(ref(db, `${basePath}/answers/${currentQuestionIndex}/${userId}`), {
+                    answer: text,
+                    name: studentName,
+                    timestamp: Date.now()
                 });
                 
-                lastSubmitTime = now;
+                hasSubmitted[currentQuestionIndex] = true;
                 document.getElementById('student-textarea').value = ''; 
-                showNotification("Komentar terkirim! 🚀");
-                
-                // Efek visual Cooldown pada tombol siswa
-                const btn = document.getElementById('btn-submit-text');
-                btn.disabled = true;
-                let timeLeft = 15;
-                btn.innerText = `Tunggu ${timeLeft} detik...`;
-                
-                const timer = setInterval(() => {
-                    timeLeft--;
-                    btn.innerText = `Tunggu ${timeLeft} detik...`;
-                    if(timeLeft <= 0) {
-                        clearInterval(timer);
-                        btn.disabled = false;
-                        btn.innerText = "Kirim Jawaban";
-                    }
-                }, 1000);
-
+                showNotification("Jawaban terkirim! 🚀");
+                updateStudentUI();
             } catch(e) {
                 console.error(e);
                 showNotification("Gagal mengirim.", "error");
@@ -590,11 +546,14 @@
         window.submitRating = async function(rating) {
             if (!userId) return;
             try {
-                await set(ref(db, basePath + `/q4_responses/${userId}`), {
+                await set(ref(db, `${basePath}/answers/${currentQuestionIndex}/${userId}`), {
                     answer: rating,
+                    name: studentName,
                     timestamp: Date.now()
                 });
+                hasSubmitted[currentQuestionIndex] = true;
                 showNotification(`Rating ${rating}/10 tersimpan! ⭐`);
+                updateStudentUI();
             } catch(e) {
                 console.error(e);
                 showNotification("Gagal menyimpan.", "error");
