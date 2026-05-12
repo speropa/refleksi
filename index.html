@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Refleksi Kelas Real-time</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a; /* Slate 900 */
+            color: #f8fafc;
+            overflow-x: hidden;
+            touch-action: pan-y;
+        }
+
+        /* Emojis growing animation */
+        .emoji-container {
+            transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        /* Floating Comments Container */
+        #floating-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 10;
+        }
+
+        /* Bar chart animation */
+        .bar-fill {
+            transition: height 0.5s ease-out;
+        }
+
+        /* Loading spinner */
+        .loader {
+            border: 4px solid rgba(255,255,255,0.1);
+            border-left-color: #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Custom scrollbar for textareas */
+        textarea::-webkit-scrollbar { width: 8px; }
+        textarea::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        textarea::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        
+        .hide { display: none !important; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center relative">
+
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="absolute inset-0 bg-slate-900 flex flex-col items-center justify-center z-50">
+        <div class="loader mb-4"></div>
+        <p class="text-slate-300 font-semibold animate-pulse">Menghubungkan ke Kelas...</p>
+    </div>
+
+    <!-- Role Selection Screen -->
+    <div id="role-selection" class="hide w-full max-w-2xl px-6 flex flex-col items-center text-center space-y-8 z-40">
+        <div>
+            <h1 class="text-4xl md:text-5xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400 mb-4">Refleksi Kelas Interaktif</h1>
+            <p class="text-slate-400 text-lg">Pilih peran Anda untuk memulai sesi.</p>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full">
+            <button onclick="selectRole('guru')" class="group relative px-8 py-12 bg-slate-800 rounded-3xl border border-slate-700 hover:border-blue-500 hover:bg-slate-750 transition-all shadow-xl hover:shadow-blue-500/20">
+                <div class="text-6xl mb-4 group-hover:scale-110 transition-transform">👨‍🏫</div>
+                <h2 class="text-2xl font-bold text-white mb-2">Layar Guru</h2>
+                <p class="text-slate-400 text-sm">Tampilkan ke proyektor kelas</p>
+            </button>
+            <button onclick="selectRole('siswa')" class="group relative px-8 py-12 bg-slate-800 rounded-3xl border border-slate-700 hover:border-emerald-500 hover:bg-slate-750 transition-all shadow-xl hover:shadow-emerald-500/20">
+                <div class="text-6xl mb-4 group-hover:scale-110 transition-transform">📱</div>
+                <h2 class="text-2xl font-bold text-white mb-2">Perangkat Siswa</h2>
+                <p class="text-slate-400 text-sm">Gunakan HP untuk menjawab</p>
+            </button>
+        </div>
+    </div>
+
+    <!-- Teacher View -->
+    <div id="teacher-view" class="hide w-full h-screen flex flex-col bg-slate-900">
+        <!-- Floating Comments layer for Q2 & Q3 -->
+        <div id="floating-container"></div>
+
+        <!-- Header -->
+        <div class="p-6 md:p-10 flex justify-between items-center z-20 border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm">
+            <h1 class="text-3xl font-bold text-blue-400">Mode Presentasi Guru</h1>
+            <div class="flex space-x-4">
+                <button onclick="changeQuestion(-1)" id="btn-prev" class="px-6 py-3 bg-slate-800 hover:bg-slate-700 rounded-full font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-white">← Sebelumnya</button>
+                <button onclick="changeQuestion(1)" id="btn-next" class="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-full font-semibold transition-colors shadow-lg shadow-blue-600/30 text-white">Selanjutnya →</button>
+            </div>
+        </div>
+
+        <!-- Main Display Area -->
+        <div class="flex-1 flex flex-col items-center justify-center p-10 z-20 relative">
+            <h2 id="teacher-question-text" class="text-4xl md:text-5xl font-extrabold text-center text-white mb-16 max-w-5xl leading-tight">Memuat Pertanyaan...</h2>
+            
+            <!-- Q1 Visuals (Emojis) -->
+            <div id="teacher-q1-visuals" class="hide w-full max-w-5xl flex justify-around items-end h-64 border-b border-slate-700 pb-8">
+                <!-- Injected via JS -->
+            </div>
+
+            <!-- Q4 Visuals (Bar Chart) -->
+            <div id="teacher-q4-visuals" class="hide w-full max-w-5xl h-80 flex items-end justify-between space-x-2 border-b-2 border-slate-700 pb-2">
+                <!-- Injected via JS -->
+            </div>
+            
+            <!-- Empty state for Q2/Q3 (Just background text) -->
+            <div id="teacher-q23-visuals" class="hide text-slate-500 text-xl animate-pulse">
+                Menunggu tanggapan masuk...
+            </div>
+        </div>
+    </div>
+
+    <!-- Student View -->
+    <div id="student-view" class="hide w-full min-h-screen bg-slate-100 text-slate-900 flex flex-col">
+        <!-- Header -->
+        <div class="bg-white p-4 shadow-sm sticky top-0 z-10 flex justify-between items-center">
+            <div class="font-bold text-emerald-600 text-lg">✨ RefleksiKu</div>
+            <div class="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-xs font-bold" id="student-status">Tersambung</div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 p-6 flex flex-col items-center justify-center max-w-md mx-auto w-full">
+            <div class="bg-white p-8 rounded-3xl shadow-xl w-full flex flex-col items-center transition-all duration-300">
+                <div class="w-full mb-6">
+                    <span class="text-xs font-bold uppercase tracking-wider text-slate-400" id="student-q-indicator">Pertanyaan 1/4</span>
+                    <h2 id="student-question-text" class="text-2xl font-extrabold mt-2 leading-tight text-slate-800 text-center">Memuat pertanyaan...</h2>
+                </div>
+
+                <!-- Notification area -->
+                <div id="student-notif" class="w-full text-center py-2 px-4 rounded-lg mb-4 text-sm font-semibold opacity-0 transition-opacity"></div>
+
+                <!-- Input Q1 (Emojis) -->
+                <div id="student-q1-input" class="hide w-full grid grid-cols-5 gap-2">
+                    <!-- JS Injected -->
+                </div>
+
+                <!-- Input Q2 & Q3 (Textarea) -->
+                <div id="student-q23-input" class="hide w-full flex flex-col space-y-4">
+                    <textarea id="student-textarea" rows="4" class="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none resize-none text-lg" placeholder="Ketik jawabanmu di sini..."></textarea>
+                    <button onclick="submitTextResponse()" class="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-2xl shadow-lg shadow-emerald-600/30 transition-all active:scale-95">Kirim Jawaban</button>
+                </div>
+
+                <!-- Input Q4 (Rating 1-10) -->
+                <div id="student-q4-input" class="hide w-full">
+                    <div class="grid grid-cols-5 gap-2 mb-4">
+                        <!-- JS Injected 1-10 -->
+                    </div>
+                </div>
+                
+                <div id="waiting-message" class="hide mt-6 text-slate-500 text-center text-sm font-medium">
+                    <div class="loader w-6 h-6 border-[3px] mx-auto mb-2 !border-slate-200 !border-left-emerald-500"></div>
+                    Menunggu guru mengganti pertanyaan...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, addDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Environment Variables
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'reflection-canvas-default';
+        
+        // Konfigurasi Firebase dari User
+        const firebaseConfig = {
+            apiKey: "AIzaSyAiLE7d9JCF4tEK50k8ZcnsSNYbL0pBO6Q",
+            authDomain: "project-guru-662f9.firebaseapp.com",
+            databaseURL: "https://project-guru-662f9-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "project-guru-662f9",
+            storageBucket: "project-guru-662f9.firebasestorage.app",
+            messagingSenderId: "608656743683",
+            appId: "1:608656743683:web:2fd7797ce84facfa279d36"
+        };
+
+        const authToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Init Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // Core variables
+        let userId = null;
+        let currentUserRole = null; // 'guru' or 'siswa'
+        let currentQuestionIndex = 0;
+        
+        // Data Structure
+        const basePath = `artifacts/${appId}/public/data`;
+        const stateDocRef = doc(db, basePath, 'globalState', 'current');
+        
+        const QUESTIONS = [
+            "Bagaimana pembelajaran pada pagi hari ini?",
+            "Momen apa yang paling berkesan untuk kamu?",
+            "Apa kesulitan yang kamu hadapi dalam mempelajari konsep peluang ini?",
+            "Berikan rating 1-10 dari pembelajaran yang sudah kita lakukan hari ini!"
+        ];
+
+        const EMOJIS = [
+            { id: 'sangat_senang', char: '🤩', label: 'Sangat Senang', color: 'bg-emerald-100 text-emerald-600' },
+            { id: 'senang', char: '😊', label: 'Senang', color: 'bg-green-100 text-green-600' },
+            { id: 'biasa', char: '😐', label: 'Biasa', color: 'bg-yellow-100 text-yellow-600' },
+            { id: 'tidak_senang', char: '😕', label: 'Tidak Senang', color: 'bg-orange-100 text-orange-600' },
+            { id: 'sangat_tidak_senang', char: '😭', label: 'Sangat Sedih', color: 'bg-red-100 text-red-600' }
+        ];
+
+        // Store active listeners to clean them up
+        let teacherListeners = [];
+
+        async function initAuth() {
+            try {
+                // Selalu gunakan Anonymous Auth untuk custom Firebase Config
+                await signInAnonymously(auth);
+                
+                userId = auth.currentUser.uid;
+                
+                // Hide loading, show role selection
+                document.getElementById('loading-screen').classList.add('hide');
+                document.getElementById('role-selection').classList.remove('hide');
+                
+            } catch (error) {
+                console.error("Auth error:", error);
+                document.getElementById('loading-screen').innerHTML = `<p class="text-red-500 bg-white p-4 rounded-lg font-bold shadow-lg">Gagal terhubung ke Firebase Anda.<br>Pastikan "Anonymous Sign-in" sudah aktif di Firebase Console.</p>`;
+            }
+        }
+
+        // Initialize Authentication on load
+        initAuth();
+
+        window.selectRole = async function(role) {
+            currentUserRole = role;
+            document.getElementById('role-selection').classList.add('hide');
+            
+            if (role === 'guru') {
+                document.getElementById('teacher-view').classList.remove('hide');
+                initTeacherMode();
+            } else {
+                document.getElementById('student-view').classList.remove('hide');
+                initStudentMode();
+            }
+        };
+
+        async function initTeacherMode() {
+            // 1. Ensure state document exists
+            const snap = await getDoc(stateDocRef);
+            if (!snap.exists()) {
+                await setDoc(stateDocRef, { questionIndex: 0 });
+            }
+
+            // 2. Listen to state changes
+            onSnapshot(stateDocRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    currentQuestionIndex = docSnap.data().questionIndex;
+                    updateTeacherUI();
+                }
+            }, (err) => console.error(err));
+        }
+
+        window.changeQuestion = async function(step) {
+            if (!userId) return;
+            let newIndex = currentQuestionIndex + step;
+            if (newIndex < 0) newIndex = 0;
+            if (newIndex >= QUESTIONS.length) newIndex = QUESTIONS.length - 1;
+            
+            // Clear floating container immediately
+            document.getElementById('floating-container').innerHTML = '';
+            
+            await setDoc(stateDocRef, { questionIndex: newIndex }, { merge: true });
+        };
+
+        function updateTeacherUI() {
+            document.getElementById('teacher-question-text').innerText = QUESTIONS[currentQuestionIndex];
+            
+            // Update Buttons state
+            document.getElementById('btn-prev').disabled = currentQuestionIndex === 0;
+            document.getElementById('btn-next').disabled = currentQuestionIndex === QUESTIONS.length - 1;
+
+            // Hide all visuals first
+            document.getElementById('teacher-q1-visuals').classList.add('hide');
+            document.getElementById('teacher-q23-visuals').classList.add('hide');
+            document.getElementById('teacher-q4-visuals').classList.add('hide');
+            document.getElementById('floating-container').innerHTML = ''; // Clear floaters
+
+            // Clear previous listeners
+            teacherListeners.forEach(unsub => unsub());
+            teacherListeners = [];
+
+            // Setup specific view & listeners based on question
+            if (currentQuestionIndex === 0) setupTeacherQ1();
+            else if (currentQuestionIndex === 1 || currentQuestionIndex === 2) setupTeacherQ23(currentQuestionIndex);
+            else if (currentQuestionIndex === 3) setupTeacherQ4();
+        }
+
+        function setupTeacherQ1() {
+            const container = document.getElementById('teacher-q1-visuals');
+            container.classList.remove('hide');
+            
+            // Init empty UI
+            container.innerHTML = EMOJIS.map(e => `
+                <div class="flex flex-col items-center">
+                    <div id="emoji-viz-${e.id}" class="emoji-container text-6xl origin-bottom mb-4 filter drop-shadow-xl">${e.char}</div>
+                    <div class="text-slate-400 text-sm font-semibold">${e.label}</div>
+                    <div id="emoji-count-${e.id}" class="text-white font-bold text-xl mt-1">0</div>
+                </div>
+            `).join('');
+
+            // Listen to responses
+            const colRef = collection(db, basePath, 'q1_responses');
+            const unsub = onSnapshot(colRef, (snapshot) => {
+                const counts = {};
+                EMOJIS.forEach(e => counts[e.id] = 0);
+                
+                snapshot.forEach(doc => {
+                    const ans = doc.data().answer;
+                    if(counts[ans] !== undefined) counts[ans]++;
+                });
+
+                // Update UI based on counts
+                EMOJIS.forEach(e => {
+                    const count = counts[e.id];
+                    document.getElementById(`emoji-count-${e.id}`).innerText = count;
+                    // Scale: Base scale 1. Max scale ~2.5 to avoid overflowing too much.
+                    const scale = 1 + (count * 0.3); 
+                    document.getElementById(`emoji-viz-${e.id}`).style.transform = `scale(${Math.min(scale, 3)})`;
+                });
+            }, (err) => console.error(err));
+            
+            teacherListeners.push(unsub);
+        }
+
+        function setupTeacherQ23(qIndex) {
+            document.getElementById('teacher-q23-visuals').classList.remove('hide');
+            
+            const colName = qIndex === 1 ? 'q2_responses' : 'q3_responses';
+            const colRef = collection(db, basePath, colName);
+            
+            // Track initial load to prevent animating old comments all at once
+            let isInitialLoad = true; 
+            
+            const unsub = onSnapshot(colRef, (snapshot) => {
+                snapshot.docChanges().forEach((change) => {
+                    if (change.type === 'added') {
+                        // If it's the initial load, maybe don't spawn them all at once or spread them
+                        if (!isInitialLoad) {
+                            spawnFloatingComment(change.doc.data().text);
+                            // Hide the "menunggu tanggapan" text
+                            document.getElementById('teacher-q23-visuals').classList.add('hide');
+                        } else {
+                            // On initial load, spawn them randomly spread out
+                            setTimeout(() => {
+                                spawnFloatingComment(change.doc.data().text);
+                                document.getElementById('teacher-q23-visuals').classList.add('hide');
+                            }, Math.random() * 3000);
+                        }
+                    }
+                });
+                isInitialLoad = false;
+            }, (err) => console.error(err));
+
+            teacherListeners.push(unsub);
+        }
+
+        function spawnFloatingComment(text) {
+            const container = document.getElementById('floating-container');
+            const el = document.createElement('div');
+            
+            // Random styling for variety
+            const colors = ['bg-white text-slate-800', 'bg-blue-100 text-blue-900', 'bg-emerald-100 text-emerald-900', 'bg-purple-100 text-purple-900'];
+            const randomColor = colors[Math.floor(Math.random() * colors.length)];
+            
+            el.className = `absolute px-6 py-4 rounded-3xl shadow-2xl text-2xl font-bold max-w-lg break-words border-b-4 border-slate-900/10 ${randomColor}`;
+            el.innerText = text;
+            
+            // Random X position (5% to 75% to stay on screen)
+            const startX = 5 + Math.random() * 70;
+            el.style.left = `${startX}%`;
+            el.style.bottom = '-100px'; // Start below screen
+            
+            container.appendChild(el);
+
+            // Animate
+            const duration = 8000 + Math.random() * 4000; // 8-12 seconds
+            const animation = el.animate([
+                { transform: 'translateY(0) scale(0.8) rotate(-5deg)', opacity: 0 },
+                { transform: 'translateY(-20vh) scale(1) rotate(2deg)', opacity: 1, offset: 0.1 },
+                { transform: 'translateY(-80vh) scale(1) rotate(-2deg)', opacity: 1, offset: 0.9 },
+                { transform: 'translateY(-110vh) scale(0.8) rotate(5deg)', opacity: 0 }
+            ], {
+                duration: duration,
+                easing: 'linear'
+            });
+
+            animation.onfinish = () => el.remove();
+        }
+
+        function setupTeacherQ4() {
+            const container = document.getElementById('teacher-q4-visuals');
+            container.classList.remove('hide');
+
+            // Setup chart UI 1-10
+            let html = '';
+            for(let i=1; i<=10; i++) {
+                html += `
+                <div class="flex flex-col items-center w-full relative h-full justify-end group">
+                    <div class="absolute top-0 opacity-0 group-hover:opacity-100 text-white font-bold transition-opacity" id="bar-label-${i}">0</div>
+                    <div id="bar-${i}" class="bar-fill w-full bg-gradient-to-t from-blue-600 to-cyan-400 rounded-t-md" style="height: 0%;"></div>
+                    <div class="mt-2 text-slate-300 font-bold">${i}</div>
+                </div>
+                `;
+            }
+            container.innerHTML = html;
+
+            const colRef = collection(db, basePath, 'q4_responses');
+            const unsub = onSnapshot(colRef, (snapshot) => {
+                const counts = {};
+                for(let i=1; i<=10; i++) counts[i] = 0;
+                let maxCount = 0;
+
+                snapshot.forEach(doc => {
+                    const ans = doc.data().answer;
+                    if(counts[ans] !== undefined) {
+                        counts[ans]++;
+                        if(counts[ans] > maxCount) maxCount = counts[ans];
+                    }
+                });
+
+                // Update UI Bars
+                for(let i=1; i<=10; i++) {
+                    const count = counts[i];
+                    document.getElementById(`bar-label-${i}`).innerText = count;
+                    // Calculate height % (leave some space at top)
+                    let heightPct = maxCount === 0 ? 0 : (count / maxCount) * 90;
+                    // minimum height just to show it exists if > 0
+                    if(count > 0 && heightPct < 5) heightPct = 5; 
+                    
+                    document.getElementById(`bar-${i}`).style.height = `${heightPct}%`;
+                }
+            }, (err) => console.error(err));
+            
+            teacherListeners.push(unsub);
+        }
+
+        function initStudentMode() {
+            // Listen to state changes from teacher
+            onSnapshot(stateDocRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    currentQuestionIndex = docSnap.data().questionIndex;
+                    updateStudentUI();
+                }
+            }, (err) => {
+                console.error(err);
+                document.getElementById('student-status').innerText = "Terputus";
+                document.getElementById('student-status').className = "bg-red-100 text-red-800 px-3 py-1 rounded-full text-xs font-bold";
+            });
+        }
+
+        function updateStudentUI() {
+            // Reset UI states
+            document.getElementById('student-question-text').innerText = QUESTIONS[currentQuestionIndex];
+            document.getElementById('student-q-indicator').innerText = `Pertanyaan ${currentQuestionIndex + 1} dari ${QUESTIONS.length}`;
+            
+            document.getElementById('student-q1-input').classList.add('hide');
+            document.getElementById('student-q23-input').classList.add('hide');
+            document.getElementById('student-q4-input').classList.add('hide');
+            document.getElementById('waiting-message').classList.add('hide');
+            
+            // Clear inputs
+            document.getElementById('student-textarea').value = '';
+
+            // Setup appropriate input view
+            if (currentQuestionIndex === 0) {
+                const q1Container = document.getElementById('student-q1-input');
+                q1Container.classList.remove('hide');
+                q1Container.innerHTML = EMOJIS.map(e => `
+                    <button onclick="submitEmoji('${e.id}')" class="flex flex-col items-center justify-center p-2 rounded-2xl hover:bg-slate-100 active:scale-95 transition-all">
+                        <span class="text-4xl mb-1">${e.char}</span>
+                    </button>
+                `).join('');
+            } 
+            else if (currentQuestionIndex === 1 || currentQuestionIndex === 2) {
+                document.getElementById('student-q23-input').classList.remove('hide');
+            } 
+            else if (currentQuestionIndex === 3) {
+                const q4Container = document.getElementById('student-q4-input');
+                q4Container.classList.remove('hide');
+                const grid = q4Container.querySelector('.grid');
+                let html = '';
+                for(let i=1; i<=10; i++) {
+                    // Gradation of colors from red to green
+                    const hue = ((i-1)/9) * 120; // 0 is red, 120 is green
+                    html += `
+                        <button onclick="submitRating(${i})" class="aspect-square flex items-center justify-center text-xl font-bold rounded-xl text-white shadow-md active:scale-90 transition-transform" style="background-color: hsl(${hue}, 70%, 50%);">
+                            ${i}
+                        </button>
+                    `;
+                }
+                grid.innerHTML = html;
+            }
+        }
+
+        function showNotification(msg, type='success') {
+            const notif = document.getElementById('student-notif');
+            notif.innerText = msg;
+            notif.className = `w-full text-center py-3 px-4 rounded-xl mb-4 text-sm font-bold transition-opacity duration-300 ${type === 'success' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`;
+            notif.style.opacity = '1';
+            setTimeout(() => { notif.style.opacity = '0'; }, 3000);
+            
+            // Show waiting state
+            document.getElementById('waiting-message').classList.remove('hide');
+        }
+
+        window.submitEmoji = async function(emojiId) {
+            if (!userId) return;
+            try {
+                // setDoc using userId so each student only has 1 active vote
+                await setDoc(doc(db, basePath, 'q1_responses', userId), {
+                    answer: emojiId,
+                    timestamp: Date.now()
+                });
+                showNotification("Pilihan tersimpan! 🤩");
+            } catch(e) {
+                console.error(e);
+                showNotification("Gagal menyimpan.", "error");
+            }
+        }
+
+        window.submitTextResponse = async function() {
+            if (!userId) return;
+            const text = document.getElementById('student-textarea').value.trim();
+            if(!text) return showNotification("Tulis sesuatu dulu ya!", "error");
+
+            try {
+                const colName = currentQuestionIndex === 1 ? 'q2_responses' : 'q3_responses';
+                // addDoc because we allow multiple comments from the same student
+                await addDoc(collection(db, basePath, colName), {
+                    text: text,
+                    userId: userId,
+                    timestamp: Date.now()
+                });
+                document.getElementById('student-textarea').value = ''; // clear input
+                showNotification("Komentar terkirim! 🚀");
+            } catch(e) {
+                console.error(e);
+                showNotification("Gagal mengirim.", "error");
+            }
+        }
+
+        window.submitRating = async function(rating) {
+            if (!userId) return;
+            try {
+                await setDoc(doc(db, basePath, 'q4_responses', userId), {
+                    answer: rating,
+                    timestamp: Date.now()
+                });
+                showNotification(`Rating ${rating}/10 tersimpan! ⭐`);
+            } catch(e) {
+                console.error(e);
+                showNotification("Gagal menyimpan.", "error");
+            }
+        }
+
+    </script>
+</body>
+</html>
