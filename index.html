@@ -53,6 +53,20 @@
         textarea::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
         textarea::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         
+        /* Animasi Komentar Melayang */
+        @keyframes floatUp {
+            0% { transform: translateY(100vh) scale(0.8); opacity: 0; }
+            10% { opacity: 1; transform: translateY(80vh) scale(1); }
+            90% { opacity: 1; }
+            100% { transform: translateY(-20vh) scale(1.1); opacity: 0; }
+        }
+        .floating-comment {
+            position: absolute;
+            bottom: 0;
+            animation: floatUp 12s linear forwards;
+            z-index: 30;
+        }
+
         .hide { display: none !important; }
     </style>
 </head>
@@ -85,12 +99,10 @@
     </div>
 
     <!-- Teacher View -->
-    <div id="teacher-view" class="hide w-full h-screen flex flex-col bg-slate-900">
-        <!-- Floating Comments layer for Q2 & Q3 -->
-        <div id="floating-container"></div>
+    <div id="teacher-view" class="hide w-full h-screen flex flex-col bg-slate-900 overflow-hidden relative">
 
         <!-- Header -->
-        <div class="p-6 md:p-10 flex justify-between items-center z-20 border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm">
+        <div class="p-6 md:p-10 flex justify-between items-center z-50 border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm">
             <h1 class="text-3xl font-bold text-blue-400">Mode Presentasi Guru</h1>
             <div class="flex space-x-4">
                 <button onclick="changeQuestion(-1)" id="btn-prev" class="px-6 py-3 bg-slate-800 hover:bg-slate-700 rounded-full font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-white">← Sebelumnya</button>
@@ -99,21 +111,24 @@
         </div>
 
         <!-- Main Display Area -->
-        <div class="flex-1 flex flex-col items-center justify-center p-10 z-20 relative">
-            <h2 id="teacher-question-text" class="text-4xl md:text-5xl font-extrabold text-center text-white mb-16 max-w-5xl leading-tight">Memuat Pertanyaan...</h2>
+        <div class="flex-1 flex flex-col items-center justify-center p-10 z-40 relative h-full">
+            <h2 id="teacher-question-text" class="text-4xl md:text-5xl font-extrabold text-center text-white mb-16 max-w-5xl leading-tight z-50">Memuat Pertanyaan...</h2>
             
+            <!-- Floating Comments Container (Untuk Q2 & Q3) -->
+            <div id="floating-container" class="hide absolute inset-0 pointer-events-none overflow-hidden z-20"></div>
+
             <!-- Q1 Visuals (Emojis) -->
-            <div id="teacher-q1-visuals" class="hide w-full max-w-5xl flex justify-around items-end h-64 border-b border-slate-700 pb-8">
+            <div id="teacher-q1-visuals" class="hide w-full max-w-5xl flex justify-around items-end h-64 border-b border-slate-700 pb-8 z-50">
                 <!-- Injected via JS -->
             </div>
 
             <!-- Q4 Visuals (Bar Chart) -->
-            <div id="teacher-q4-visuals" class="hide w-full max-w-5xl h-80 flex items-end justify-between space-x-2 border-b-2 border-slate-700 pb-2">
+            <div id="teacher-q4-visuals" class="hide w-full max-w-5xl h-80 flex items-end justify-between space-x-2 border-b-2 border-slate-700 pb-2 z-50">
                 <!-- Injected via JS -->
             </div>
-            
-            <!-- Empty state for Q2/Q3 (Just background text) -->
-            <div id="teacher-q23-visuals" class="hide text-slate-500 text-xl animate-pulse">
+
+            <!-- Empty state for Q2/Q3 -->
+            <div id="teacher-q23-empty" class="hide text-slate-500 text-xl animate-pulse mt-10 z-50">
                 Menunggu tanggapan masuk...
             </div>
         </div>
@@ -146,7 +161,7 @@
                 <!-- Input Q2 & Q3 (Textarea) -->
                 <div id="student-q23-input" class="hide w-full flex flex-col space-y-4">
                     <textarea id="student-textarea" rows="4" class="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none resize-none text-lg" placeholder="Ketik jawabanmu di sini..."></textarea>
-                    <button onclick="submitTextResponse()" class="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-2xl shadow-lg shadow-emerald-600/30 transition-all active:scale-95">Kirim Jawaban</button>
+                    <button id="btn-submit-text" onclick="submitTextResponse()" class="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-2xl shadow-lg shadow-emerald-600/30 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">Kirim Jawaban</button>
                 </div>
 
                 <!-- Input Q4 (Rating 1-10) -->
@@ -166,11 +181,12 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, addDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getDatabase, ref, set, onValue, push, onChildAdded } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
 
-        // Environment Variables
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'reflection-canvas-default';
+        // Environment Variables & Sanitasi Karakter Terlarang RTDB
+        const rawAppId = typeof __app_id !== 'undefined' ? __app_id : 'reflection-canvas-default';
+        const appId = rawAppId.replace(/[.#$\[\]]/g, '_');
         
         // Konfigurasi Firebase dari User
         const firebaseConfig = {
@@ -183,21 +199,19 @@
             appId: "1:608656743683:web:2fd7797ce84facfa279d36"
         };
 
-        const authToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
         // Init Firebase
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
-        const db = getFirestore(app);
+        const db = getDatabase(app); // Menggunakan Realtime Database (RTDB)
 
         // Core variables
         let userId = null;
-        let currentUserRole = null; // 'guru' or 'siswa'
+        let currentUserRole = null;
         let currentQuestionIndex = 0;
         
         // Data Structure
         const basePath = `artifacts/${appId}/public/data`;
-        const stateDocRef = doc(db, basePath, 'globalState', 'current');
+        const stateDbRef = ref(db, basePath + '/globalState/current');
         
         const QUESTIONS = [
             "Bagaimana pembelajaran pada pagi hari ini?",
@@ -207,34 +221,31 @@
         ];
 
         const EMOJIS = [
-            { id: 'sangat_senang', char: '🤩', label: 'Sangat Senang', color: 'bg-emerald-100 text-emerald-600' },
-            { id: 'senang', char: '😊', label: 'Senang', color: 'bg-green-100 text-green-600' },
-            { id: 'biasa', char: '😐', label: 'Biasa', color: 'bg-yellow-100 text-yellow-600' },
-            { id: 'tidak_senang', char: '😕', label: 'Tidak Senang', color: 'bg-orange-100 text-orange-600' },
-            { id: 'sangat_tidak_senang', char: '😭', label: 'Sangat Sedih', color: 'bg-red-100 text-red-600' }
+            { id: 'sangat_senang', char: '🤩', label: 'Sangat Senang' },
+            { id: 'senang', char: '😊', label: 'Senang' },
+            { id: 'biasa', char: '😐', label: 'Biasa' },
+            { id: 'tidak_senang', char: '😕', label: 'Tidak Senang' },
+            { id: 'sangat_tidak_senang', char: '😭', label: 'Sangat Sedih' }
         ];
 
-        // Store active listeners to clean them up
         let teacherListeners = [];
+        let commentQueue = [];
+        let activeComments = 0;
+        let floatingInterval = null;
 
         async function initAuth() {
             try {
-                // Selalu gunakan Anonymous Auth untuk custom Firebase Config
                 await signInAnonymously(auth);
-                
                 userId = auth.currentUser.uid;
                 
-                // Hide loading, show role selection
                 document.getElementById('loading-screen').classList.add('hide');
                 document.getElementById('role-selection').classList.remove('hide');
-                
             } catch (error) {
                 console.error("Auth error:", error);
                 document.getElementById('loading-screen').innerHTML = `<p class="text-red-500 bg-white p-4 rounded-lg font-bold shadow-lg">Gagal terhubung ke Firebase Anda.<br>Pastikan "Anonymous Sign-in" sudah aktif di Firebase Console.</p>`;
             }
         }
 
-        // Initialize Authentication on load
         initAuth();
 
         window.selectRole = async function(role) {
@@ -250,20 +261,17 @@
             }
         };
 
-        async function initTeacherMode() {
-            // 1. Ensure state document exists
-            const snap = await getDoc(stateDocRef);
-            if (!snap.exists()) {
-                await setDoc(stateDocRef, { questionIndex: 0 });
-            }
-
-            // 2. Listen to state changes
-            onSnapshot(stateDocRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    currentQuestionIndex = docSnap.data().questionIndex;
-                    updateTeacherUI();
+        function initTeacherMode() {
+            // Listen to state changes via RTDB
+            onValue(stateDbRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    currentQuestionIndex = snapshot.val().questionIndex || 0;
+                } else {
+                    set(stateDbRef, { questionIndex: 0 });
+                    currentQuestionIndex = 0;
                 }
-            }, (err) => console.error(err));
+                updateTeacherUI();
+            });
         }
 
         window.changeQuestion = async function(step) {
@@ -272,30 +280,30 @@
             if (newIndex < 0) newIndex = 0;
             if (newIndex >= QUESTIONS.length) newIndex = QUESTIONS.length - 1;
             
-            // Clear floating container immediately
-            document.getElementById('floating-container').innerHTML = '';
-            
-            await setDoc(stateDocRef, { questionIndex: newIndex }, { merge: true });
+            await set(stateDbRef, { questionIndex: newIndex });
         };
 
         function updateTeacherUI() {
             document.getElementById('teacher-question-text').innerText = QUESTIONS[currentQuestionIndex];
             
-            // Update Buttons state
             document.getElementById('btn-prev').disabled = currentQuestionIndex === 0;
             document.getElementById('btn-next').disabled = currentQuestionIndex === QUESTIONS.length - 1;
 
-            // Hide all visuals first
             document.getElementById('teacher-q1-visuals').classList.add('hide');
-            document.getElementById('teacher-q23-visuals').classList.add('hide');
+            document.getElementById('floating-container').classList.add('hide');
+            document.getElementById('teacher-q23-empty').classList.add('hide');
             document.getElementById('teacher-q4-visuals').classList.add('hide');
-            document.getElementById('floating-container').innerHTML = ''; // Clear floaters
+            
+            // Bersihkan antrean dan interval
+            document.getElementById('floating-container').innerHTML = '';
+            commentQueue = [];
+            activeComments = 0;
+            if(floatingInterval) clearInterval(floatingInterval);
 
-            // Clear previous listeners
+            // Matikan listener sebelumnya
             teacherListeners.forEach(unsub => unsub());
             teacherListeners = [];
 
-            // Setup specific view & listeners based on question
             if (currentQuestionIndex === 0) setupTeacherQ1();
             else if (currentQuestionIndex === 1 || currentQuestionIndex === 2) setupTeacherQ23(currentQuestionIndex);
             else if (currentQuestionIndex === 3) setupTeacherQ4();
@@ -305,7 +313,6 @@
             const container = document.getElementById('teacher-q1-visuals');
             container.classList.remove('hide');
             
-            // Init empty UI
             container.innerHTML = EMOJIS.map(e => `
                 <div class="flex flex-col items-center">
                     <div id="emoji-viz-${e.id}" class="emoji-container text-6xl origin-bottom mb-4 filter drop-shadow-xl">${e.char}</div>
@@ -314,100 +321,89 @@
                 </div>
             `).join('');
 
-            // Listen to responses
-            const colRef = collection(db, basePath, 'q1_responses');
-            const unsub = onSnapshot(colRef, (snapshot) => {
+            const colRef = ref(db, basePath + '/q1_responses');
+            const unsub = onValue(colRef, (snapshot) => {
                 const counts = {};
                 EMOJIS.forEach(e => counts[e.id] = 0);
                 
-                snapshot.forEach(doc => {
-                    const ans = doc.data().answer;
+                snapshot.forEach(child => {
+                    const ans = child.val().answer;
                     if(counts[ans] !== undefined) counts[ans]++;
                 });
 
-                // Update UI based on counts
                 EMOJIS.forEach(e => {
                     const count = counts[e.id];
                     document.getElementById(`emoji-count-${e.id}`).innerText = count;
-                    // Scale: Base scale 1. Max scale ~2.5 to avoid overflowing too much.
                     const scale = 1 + (count * 0.3); 
                     document.getElementById(`emoji-viz-${e.id}`).style.transform = `scale(${Math.min(scale, 3)})`;
                 });
-            }, (err) => console.error(err));
+            });
             
             teacherListeners.push(unsub);
         }
 
         function setupTeacherQ23(qIndex) {
-            document.getElementById('teacher-q23-visuals').classList.remove('hide');
+            const container = document.getElementById('floating-container');
+            const emptyState = document.getElementById('teacher-q23-empty');
+            
+            container.classList.remove('hide');
+            emptyState.classList.remove('hide');
             
             const colName = qIndex === 1 ? 'q2_responses' : 'q3_responses';
-            const colRef = collection(db, basePath, colName);
+            const colRef = ref(db, basePath + '/' + colName);
             
-            // Track initial load to prevent animating old comments all at once
-            let isInitialLoad = true; 
-            
-            const unsub = onSnapshot(colRef, (snapshot) => {
-                snapshot.docChanges().forEach((change) => {
-                    if (change.type === 'added') {
-                        // If it's the initial load, maybe don't spawn them all at once or spread them
-                        if (!isInitialLoad) {
-                            spawnFloatingComment(change.doc.data().text);
-                            // Hide the "menunggu tanggapan" text
-                            document.getElementById('teacher-q23-visuals').classList.add('hide');
-                        } else {
-                            // On initial load, spawn them randomly spread out
-                            setTimeout(() => {
-                                spawnFloatingComment(change.doc.data().text);
-                                document.getElementById('teacher-q23-visuals').classList.add('hide');
-                            }, Math.random() * 3000);
-                        }
-                    }
-                });
-                isInitialLoad = false;
-            }, (err) => console.error(err));
+            // Dengarkan komentar masuk secara realtime (RTDB)
+            const unsub = onChildAdded(colRef, (snapshot) => {
+                emptyState.classList.add('hide'); // Ada data, sembunyikan tulisan "menunggu"
+                commentQueue.push(snapshot.val().text);
+            });
+
+            // Loop Antrean: Muncul satu per satu tiap 1.5 detik
+            floatingInterval = setInterval(() => {
+                if (commentQueue.length > 0 && activeComments < 10) {
+                    const text = commentQueue.shift(); // Ambil dari antrean
+                    spawnFloatingComment(text);
+                }
+            }, 1500);
 
             teacherListeners.push(unsub);
         }
 
         function spawnFloatingComment(text) {
+            activeComments++;
             const container = document.getElementById('floating-container');
             const el = document.createElement('div');
             
-            // Random styling for variety
-            const colors = ['bg-white text-slate-800', 'bg-blue-100 text-blue-900', 'bg-emerald-100 text-emerald-900', 'bg-purple-100 text-purple-900'];
+            const colors = ['bg-white text-slate-800', 'bg-blue-100 text-blue-900', 'bg-emerald-100 text-emerald-900', 'bg-purple-100 text-purple-900', 'bg-amber-100 text-amber-900'];
             const randomColor = colors[Math.floor(Math.random() * colors.length)];
             
-            el.className = `absolute px-6 py-4 rounded-3xl shadow-2xl text-2xl font-bold max-w-lg break-words border-b-4 border-slate-900/10 ${randomColor}`;
-            el.innerText = text;
+            // Posisi X acak (antara 5% - 75% lebar agar aman dari pinggir layar)
+            const leftPos = 5 + (Math.random() * 70);
             
-            // Random X position (5% to 75% to stay on screen)
-            const startX = 5 + Math.random() * 70;
-            el.style.left = `${startX}%`;
-            el.style.bottom = '-100px'; // Start below screen
+            el.className = `floating-comment px-6 py-4 rounded-2xl shadow-2xl text-2xl font-bold max-w-md break-words ${randomColor}`;
+            el.style.left = `${leftPos}%`;
+            el.innerText = text;
             
             container.appendChild(el);
 
-            // Animate
-            const duration = 8000 + Math.random() * 4000; // 8-12 seconds
-            const animation = el.animate([
-                { transform: 'translateY(0) scale(0.8) rotate(-5deg)', opacity: 0 },
-                { transform: 'translateY(-20vh) scale(1) rotate(2deg)', opacity: 1, offset: 0.1 },
-                { transform: 'translateY(-80vh) scale(1) rotate(-2deg)', opacity: 1, offset: 0.9 },
-                { transform: 'translateY(-110vh) scale(0.8) rotate(5deg)', opacity: 0 }
-            ], {
-                duration: duration,
-                easing: 'linear'
-            });
+            // Hapus setelah 12 detik, lalu jeda 5 detik, kemudian masukkan ulang ke antrean
+            setTimeout(() => {
+                if (container.contains(el)) {
+                    container.removeChild(el);
+                }
+                activeComments--;
+                
+                setTimeout(() => {
+                    commentQueue.push(text); // Masukkan lagi agar terus menerus
+                }, 5000); 
 
-            animation.onfinish = () => el.remove();
+            }, 12000);
         }
 
         function setupTeacherQ4() {
             const container = document.getElementById('teacher-q4-visuals');
             container.classList.remove('hide');
 
-            // Setup chart UI 1-10
             let html = '';
             for(let i=1; i<=10; i++) {
                 html += `
@@ -420,52 +416,47 @@
             }
             container.innerHTML = html;
 
-            const colRef = collection(db, basePath, 'q4_responses');
-            const unsub = onSnapshot(colRef, (snapshot) => {
+            const colRef = ref(db, basePath + '/q4_responses');
+            const unsub = onValue(colRef, (snapshot) => {
                 const counts = {};
                 for(let i=1; i<=10; i++) counts[i] = 0;
                 let maxCount = 0;
 
-                snapshot.forEach(doc => {
-                    const ans = doc.data().answer;
+                snapshot.forEach(child => {
+                    const ans = child.val().answer;
                     if(counts[ans] !== undefined) {
                         counts[ans]++;
                         if(counts[ans] > maxCount) maxCount = counts[ans];
                     }
                 });
 
-                // Update UI Bars
                 for(let i=1; i<=10; i++) {
                     const count = counts[i];
                     document.getElementById(`bar-label-${i}`).innerText = count;
-                    // Calculate height % (leave some space at top)
                     let heightPct = maxCount === 0 ? 0 : (count / maxCount) * 90;
-                    // minimum height just to show it exists if > 0
                     if(count > 0 && heightPct < 5) heightPct = 5; 
                     
                     document.getElementById(`bar-${i}`).style.height = `${heightPct}%`;
                 }
-            }, (err) => console.error(err));
+            });
             
             teacherListeners.push(unsub);
         }
 
         function initStudentMode() {
-            // Listen to state changes from teacher
-            onSnapshot(stateDocRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    currentQuestionIndex = docSnap.data().questionIndex;
+            onValue(stateDbRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    currentQuestionIndex = snapshot.val().questionIndex || 0;
                     updateStudentUI();
                 }
-            }, (err) => {
-                console.error(err);
+            }, (error) => {
+                console.error(error);
                 document.getElementById('student-status').innerText = "Terputus";
                 document.getElementById('student-status').className = "bg-red-100 text-red-800 px-3 py-1 rounded-full text-xs font-bold";
             });
         }
 
         function updateStudentUI() {
-            // Reset UI states
             document.getElementById('student-question-text').innerText = QUESTIONS[currentQuestionIndex];
             document.getElementById('student-q-indicator').innerText = `Pertanyaan ${currentQuestionIndex + 1} dari ${QUESTIONS.length}`;
             
@@ -474,10 +465,8 @@
             document.getElementById('student-q4-input').classList.add('hide');
             document.getElementById('waiting-message').classList.add('hide');
             
-            // Clear inputs
             document.getElementById('student-textarea').value = '';
 
-            // Setup appropriate input view
             if (currentQuestionIndex === 0) {
                 const q1Container = document.getElementById('student-q1-input');
                 q1Container.classList.remove('hide');
@@ -496,8 +485,7 @@
                 const grid = q4Container.querySelector('.grid');
                 let html = '';
                 for(let i=1; i<=10; i++) {
-                    // Gradation of colors from red to green
-                    const hue = ((i-1)/9) * 120; // 0 is red, 120 is green
+                    const hue = ((i-1)/9) * 120;
                     html += `
                         <button onclick="submitRating(${i})" class="aspect-square flex items-center justify-center text-xl font-bold rounded-xl text-white shadow-md active:scale-90 transition-transform" style="background-color: hsl(${hue}, 70%, 50%);">
                             ${i}
@@ -515,15 +503,13 @@
             notif.style.opacity = '1';
             setTimeout(() => { notif.style.opacity = '0'; }, 3000);
             
-            // Show waiting state
-            document.getElementById('waiting-message').classList.remove('hide');
+            if(type === 'success') document.getElementById('waiting-message').classList.remove('hide');
         }
 
         window.submitEmoji = async function(emojiId) {
             if (!userId) return;
             try {
-                // setDoc using userId so each student only has 1 active vote
-                await setDoc(doc(db, basePath, 'q1_responses', userId), {
+                await set(ref(db, basePath + `/q1_responses/${userId}`), {
                     answer: emojiId,
                     timestamp: Date.now()
                 });
@@ -534,21 +520,56 @@
             }
         }
 
+        // Variabel untuk Cooldown Siswa
+        let lastSubmitTime = 0;
+        const COOLDOWN_MS = 15000; // 15 detik
+
         window.submitTextResponse = async function() {
             if (!userId) return;
+
+            // Cek durasi antara pengiriman terakhir dan sekarang
+            const now = Date.now();
+            const timeDiff = now - lastSubmitTime;
+            
+            // Jika kurang dari 15 detik, blokir.
+            if (timeDiff < COOLDOWN_MS) {
+                const waitTime = Math.ceil((COOLDOWN_MS - timeDiff) / 1000);
+                return showNotification(`Tunggu ${waitTime} detik lagi ya! ⏳`, "error");
+            }
+
             const text = document.getElementById('student-textarea').value.trim();
             if(!text) return showNotification("Tulis sesuatu dulu ya!", "error");
 
             try {
                 const colName = currentQuestionIndex === 1 ? 'q2_responses' : 'q3_responses';
-                // addDoc because we allow multiple comments from the same student
-                await addDoc(collection(db, basePath, colName), {
+                const newDocRef = push(ref(db, basePath + '/' + colName));
+                
+                await set(newDocRef, {
                     text: text,
                     userId: userId,
-                    timestamp: Date.now()
+                    timestamp: now
                 });
-                document.getElementById('student-textarea').value = ''; // clear input
+                
+                lastSubmitTime = now;
+                document.getElementById('student-textarea').value = ''; 
                 showNotification("Komentar terkirim! 🚀");
+                
+                // Efek visual Cooldown pada tombol siswa
+                const btn = document.getElementById('btn-submit-text');
+                btn.disabled = true;
+                let timeLeft = 15;
+                btn.innerText = `Tunggu ${timeLeft} detik...`;
+                
+                const timer = setInterval(() => {
+                    timeLeft--;
+                    btn.innerText = `Tunggu ${timeLeft} detik...`;
+                    if(timeLeft <= 0) {
+                        clearInterval(timer);
+                        btn.disabled = false;
+                        btn.innerText = "Kirim Jawaban";
+                    }
+                }, 1000);
+
             } catch(e) {
                 console.error(e);
                 showNotification("Gagal mengirim.", "error");
@@ -558,7 +579,7 @@
         window.submitRating = async function(rating) {
             if (!userId) return;
             try {
-                await setDoc(doc(db, basePath, 'q4_responses', userId), {
+                await set(ref(db, basePath + `/q4_responses/${userId}`), {
                     answer: rating,
                     timestamp: Date.now()
                 });
@@ -568,7 +589,6 @@
                 showNotification("Gagal menyimpan.", "error");
             }
         }
-
     </script>
 </body>
 </html>
